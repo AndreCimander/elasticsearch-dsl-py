@@ -1,7 +1,9 @@
 import collections
 import re
+import logging
+from time import sleep
 
-from elasticsearch.exceptions import NotFoundError, RequestError
+from elasticsearch.exceptions import NotFoundError, RequestError, ConnectionError, TransportError
 from six import iteritems, add_metaclass
 
 from .field import Field
@@ -152,14 +154,24 @@ class DocType(ObjectBase):
         )
 
     @classmethod
-    def get(cls, id, using=None, index=None, **kwargs):
+    def get(cls, id, using=None, index=None, retry_max_retries=2, retry_retried=0, **kwargs):
         es = connections.get_connection(using or cls._doc_type.using)
-        doc = es.get(
-            index=index or cls._doc_type.index,
-            doc_type=cls._doc_type.name,
-            id=id,
-            **kwargs
-        )
+        try:
+            doc = es.get(
+                index=index or cls._doc_type.index,
+                doc_type=cls._doc_type.name,
+                id=id,
+                **kwargs
+            )
+        except (ConnectionError, TransportError):
+            if retry_retried >= retry_max_retries:
+                raise
+            logging.debug("encountered a connection or transport exception, retrying...")
+            sleep(2 ** retry_retried)
+            retry_retried += 1
+            return cls.get(id, using=using, index=index, retry_max_retries=retry_max_retries,
+                           retry_retried=retry_retried, **kwargs)
+
         if not doc['found']:
             return None
         return cls.from_es(doc)
