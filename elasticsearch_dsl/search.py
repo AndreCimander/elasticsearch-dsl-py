@@ -574,7 +574,7 @@ class Search(Request):
         Execute the search and return an instance of ``Response`` wrapping all
         the data.
 
-        :arg response_class: optional subclass of ``Response`` to use instead.
+        :arg ignore_cache: ignore request?
         """
         if ignore_cache or not hasattr(self, '_response'):
             es = connections.get_connection(self._using)
@@ -604,7 +604,7 @@ class Search(Request):
             )
         )
 
-    def scan(self):
+    def scan(self, raw=False):
         """
         Turn the search into a scan search and return a generator that will
         iterate over all the documents matching the query.
@@ -613,6 +613,8 @@ class Search(Request):
         pass to the underlying ``scan`` helper from ``elasticsearch-py`` -
         https://elasticsearch-py.readthedocs.io/en/master/helpers.html#elasticsearch.helpers.scan
 
+        :arg raw: set to True to get raw result dict from elasticsearch. 
+        
         """
         es = connections.get_connection(self._using)
 
@@ -623,7 +625,8 @@ class Search(Request):
                 doc_type=self._doc_type,
                 **self._params
             ):
-            yield self._doc_type_map.get(hit['_type'], Hit)(hit)
+
+            yield self._doc_type_map.get(hit['_type'], Hit)(hit) if not raw else hit
 
 
 class MultiSearch(Request):
