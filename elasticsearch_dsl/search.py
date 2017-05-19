@@ -12,12 +12,14 @@ from .utils import DslBase
 from .response import Response, Hit, SuggestResponse
 from .connections import connections
 
+
 class QueryProxy(object):
     """
     Simple proxy around DSL objects (queries) that can be called
     (to add query/post_filter) and also allows attribute access which is proxied to
     the wrapped query.
     """
+
     def __init__(self, search, attr_name):
         self._search = search
         self._proxied = EMPTY_QUERY
@@ -25,6 +27,7 @@ class QueryProxy(object):
 
     def __nonzero__(self):
         return self._proxied != EMPTY_QUERY
+
     __bool__ = __nonzero__
 
     def __call__(self, *args, **kwargs):
@@ -52,6 +55,7 @@ class ProxyDescriptor(object):
         s.query = Q(...)
 
     """
+
     def __init__(self, name):
         self._attr_name = '_%s_proxy' % name
 
@@ -65,12 +69,14 @@ class ProxyDescriptor(object):
 
 class AggsProxy(AggBase, DslBase):
     name = 'aggs'
+
     def __init__(self, search):
         self._base = self._search = search
         self._params = {'aggs': {}}
 
     def to_dict(self):
         return super(AggsProxy, self).to_dict().get('aggs', {})
+
 
 class Request(object):
     def __init__(self, using='default', index=None, doc_type=None, extra=None):
@@ -624,8 +630,7 @@ class Search(Request):
                 index=self._index,
                 doc_type=self._doc_type,
                 **self._params
-            ):
-
+        ):
             yield self._doc_type_map.get(hit['_type'], Hit)(hit) if not raw else hit
 
 
@@ -634,6 +639,7 @@ class MultiSearch(Request):
     Combine multiple :class:`~elasticsearch_dsl.Search` objects into a single
     request.
     """
+
     def __init__(self, **kwargs):
         super(MultiSearch, self).__init__(**kwargs)
         self._searches = []
