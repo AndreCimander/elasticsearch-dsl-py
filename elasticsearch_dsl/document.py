@@ -352,7 +352,7 @@ class DocType(ObjectBase):
         meta['_source'] = d
         return meta
 
-    def update(self, using=None, index=None, detect_noop=True, doc_as_upsert=False, **fields):
+    def update(self, using=None, index=None, detect_noop=True, doc_as_upsert=False, all_fields=False, **fields):
         """
         Partial update of the document, specify fields you wish to update and
         both the instance and the document in elasticsearch will be updated::
@@ -366,11 +366,12 @@ class DocType(ObjectBase):
         :arg using: connection alias to use, defaults to ``'default'``
         :arg detect_noop: check if values have changed to avoid unnecessary write operation. Default: True.
         :arg doc_as_upsert: index document if it doesn't exist. Default: False.
+        :arg all_fields: send update query for all fields? If set to True, `**fields` may be empty.
 
         Any additional keyword arguments will be passed to
         ``Elasticsearch.update`` unchanged.
         """
-        if not fields:
+        if not fields and not all_fields:
             raise IllegalOperation('You cannot call update() without updating individual fields. '
                                    'If you wish to update the entire object use save().')
 
