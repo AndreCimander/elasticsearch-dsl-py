@@ -381,12 +381,12 @@ class DocType(ObjectBase):
         merge(self._d_, fields)
 
         # prepare data for ES
-        values = self.to_dict()
+        doc = self.to_dict()
 
         # if fields were given: partial update
         if fields:
             doc = dict(
-                (k, values.get(k))
+                (k, doc.get(k))
                 for k in fields.keys()
             )
 
