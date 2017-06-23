@@ -384,10 +384,11 @@ class DocType(ObjectBase):
         values = self.to_dict()
 
         # if fields were given: partial update
-        doc = dict(
-            (k, values.get(k))
-            for k in fields.keys()
-        )
+        if fields:
+            doc = dict(
+                (k, values.get(k))
+                for k in fields.keys()
+            )
 
         # extract parent, routing etc from meta
         doc_meta = dict(
