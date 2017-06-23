@@ -1,7 +1,7 @@
 import collections
 
 from .utils import DslBase
-from .response.aggs import BucketData, AggData, TopHitsData
+from .response.aggs import BucketData, FieldBucketData, AggResponse, TopHitsData
 
 def A(name_or_agg, filter=None, **params):
     if filter is not None:
@@ -25,7 +25,7 @@ def A(name_or_agg, filter=None, **params):
         if aggs:
             params = params.copy()
             params['aggs'] = aggs
-        return Agg.get_dsl_class(agg_type)(**params)
+        return Agg.get_dsl_class(agg_type)(_expand__to_dot=False, **params)
 
     # Terms(...) just return the nested agg
     elif isinstance(name_or_agg, Agg):
@@ -40,6 +40,10 @@ class Agg(DslBase):
     _type_name = 'agg'
     _type_shortcut = staticmethod(A)
     name = None
+
+    def __contains__(self, key):
+        return False
+
     def to_dict(self):
         d = super(Agg, self).to_dict()
         if 'meta' in d[self.name]:
@@ -47,13 +51,16 @@ class Agg(DslBase):
         return d
 
     def result(self, search, data):
-        return AggData(self, search, data)
+        return AggResponse(self, search, data)
 
 
 class AggBase(object):
     _param_defs = {
         'aggs': {'type': 'agg', 'hash': True},
     }
+    def __contains__(self, key):
+        return key in self._params.get('aggs', {})
+
     def __getitem__(self, agg_name):
         agg = self._params.setdefault('aggs', {})[agg_name] # propagate KeyError
 
@@ -130,13 +137,19 @@ class Pipeline(Agg):
 # bucket aggregations
 class Filters(Bucket):
     name = 'filters'
-    _param_defs = {'filters': {'type': 'query', 'hash': True}}
+    _param_defs = {
+        'filters': {'type': 'query', 'hash': True},
+        'aggs': {'type': 'agg', 'hash': True},
+    }
 
 class Children(Bucket):
     name = 'children'
 
 class DateHistogram(Bucket):
     name = 'date_histogram'
+
+    def result(self, search, data):
+        return FieldBucketData(self, search, data)
 
 class DateRange(Bucket):
     name = 'date_range'
@@ -155,6 +168,8 @@ class Global(Bucket):
 
 class Histogram(Bucket):
     name = 'histogram'
+    def result(self, search, data):
+        return FieldBucketData(self, search, data)
 
 class Iprange(Bucket):
     name = 'iprange'
@@ -176,6 +191,9 @@ class SignificantTerms(Bucket):
 
 class Terms(Bucket):
     name = 'terms'
+
+    def result(self, search, data):
+        return FieldBucketData(self, search, data)
 
 class Sampler(Bucket):
     name = 'sampler'

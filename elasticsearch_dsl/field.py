@@ -46,6 +46,9 @@ class Field(DslBase):
         self._required = kwargs.pop('required', False)
         super(Field, self).__init__(*args, **kwargs)
 
+    def __getitem__(self, subfield):
+        return self._params.get('fields', {})[subfield]
+
     def _serialize(self, data):
         return data
 
@@ -250,6 +253,11 @@ class Keyword(Field):
 class Boolean(Field):
     name = 'boolean'
 
+    def _deserialize(self, data):
+        if data is None:
+            return None
+        return bool(data)
+
     def clean(self, data):
         if data is not None:
             data = self.deserialize(data)
@@ -259,6 +267,9 @@ class Boolean(Field):
 
 class Float(Field):
     name = 'float'
+
+class HalfFloat(Field):
+    name = 'half_float'
 
 class Double(Field):
     name = 'double'
@@ -289,3 +300,6 @@ class GeoShape(Field):
 
 class Completion(Field):
     name = 'completion'
+
+class Percolator(Field):
+    name = 'percolator'

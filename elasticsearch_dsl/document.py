@@ -352,7 +352,7 @@ class DocType(ObjectBase):
         meta['_source'] = d
         return meta
 
-    def update(self, using=None, index=None, detect_noop=True, doc_as_upsert=False, all_fields=False, **fields):
+    def update(self, using=None, index=None,  detect_noop=True, doc_as_upsert=False, all_fields=False, **fields):
         """
         Partial update of the document, specify fields you wish to update and
         both the instance and the document in elasticsearch will be updated::
@@ -378,18 +378,16 @@ class DocType(ObjectBase):
         es = self._get_connection(using)
 
         # update given fields locally
-        if len(fields):
-            merge(self._d_, fields)
+        merge(self._d_, fields)
 
         # prepare data for ES
-        doc = self.to_dict()
+        values = self.to_dict()
 
         # if fields were given: partial update
-        if fields:
-            doc = dict(
-                (k, doc.get(k))
-                for k in fields.keys()
-            )
+        doc = dict(
+            (k, values.get(k))
+            for k in fields.keys()
+        )
 
         # extract parent, routing etc from meta
         doc_meta = dict(
@@ -397,10 +395,11 @@ class DocType(ObjectBase):
             for k in DOC_META_FIELDS
             if k in self.meta
         )
-        body = {'doc': doc}
-        if doc_as_upsert:
-            body['doc_as_upsert'] = True
-        body['detect_noop'] = True if detect_noop else False
+        body = {
+            'doc': doc,
+            'doc_as_upsert': doc_as_upsert,
+            'detect_noop': detect_noop,
+        }
 
         meta = es.update(
             index=self._get_index(index),

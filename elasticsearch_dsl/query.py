@@ -15,7 +15,7 @@ def Q(name_or_query='match_all', **params):
             raise ValueError('Q() can only accept dict with a single query ({"match": {...}}). '
                  'Instead it got (%r)' % name_or_query)
         name, params = name_or_query.copy().popitem()
-        return Query.get_dsl_class(name)(**params)
+        return Query.get_dsl_class(name)(_expand__to_dot=False, **params)
 
     # MatchAll()
     if isinstance(name_or_query, Query):
@@ -109,7 +109,7 @@ class Bool(Query):
 
     @property
     def _min_should_match(self):
-        return getattr(self, 'minimum_should_match', 0 if (self.must or self.filter) else 1)
+        return getattr(self, 'minimum_should_match', 0 if not self.should or (self.must or self.filter) else 1)
 
     def __invert__(self):
         negations = []
@@ -143,6 +143,9 @@ class Bool(Query):
                 elif not q.should:
                     q.minimum_should_match = min_should_match
                     q.should = qx.should
+                # all queries are optional, just extend should
+                elif q._min_should_match == 0 and min_should_match == 0:
+                    q.should.extend(qx.should)
                 # not all are required, add a should list to the must with proper min_should_match
                 else:
                     q.must.append(Bool(should=qx.should, minimum_should_match=min_should_match))
@@ -175,64 +178,75 @@ class FunctionScore(Query):
 # compound queries
 class Boosting(Query):
     name = 'boosting'
-    _params_def = {'positive': {'type': 'query'}, 'negative': {'type': 'query'}}
+    _param_defs = {'positive': {'type': 'query'}, 'negative': {'type': 'query'}}
 
 class ConstantScore(Query):
     name = 'constant_score'
-    _params_def = {'query': {'type': 'query'}, 'filter': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}, 'filter': {'type': 'query'}}
 
 class DisMax(Query):
     name = 'dis_max'
-    _params_def = {'queries': {'type': 'query', 'multi': True}}
+    _param_defs = {'queries': {'type': 'query', 'multi': True}}
 
 class Filtered(Query):
     name = 'filtered'
-    _params_def = {'query': {'type': 'query'}, 'filter': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}, 'filter': {'type': 'query'}}
 
 class Indices(Query):
     name = 'indices'
-    _params_def = {'query': {'type': 'query'}, 'no_match_query': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}, 'no_match_query': {'type': 'query'}}
 
 
 # relationship queries
 class Nested(Query):
     name = 'nested'
-    _params_def = {'query': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}}
 
 class HasChild(Query):
     name = 'has_child'
-    _params_def = {'query': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}}
 
 class HasParent(Query):
     name = 'has_parent'
-    _params_def = {'query': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}}
 
 class TopChildren(Query):
     name = 'top_children'
-    _params_def = {'query': {'type': 'query'}}
+    _param_defs = {'query': {'type': 'query'}}
 
 
 # compount span queries
 class SpanFirst(Query):
     name = 'span_first'
-    _params_def = {'match': {'type': 'query'}}
+    _param_defs = {'match': {'type': 'query'}}
 
 class SpanMulti(Query):
     name = 'span_multi'
-    _params_def = {'match': {'type': 'query'}}
+    _param_defs = {'match': {'type': 'query'}}
 
 class SpanNear(Query):
     name = 'span_near'
-    _params_def = {'clauses': {'type': 'query', 'multi': True}}
+    _param_defs = {'clauses': {'type': 'query', 'multi': True}}
 
 class SpanNot(Query):
     name = 'span_not'
-    _params_def = {'exclude': {'type': 'query'}, 'include': {'type': 'query'}}
+    _param_defs = {'exclude': {'type': 'query'}, 'include': {'type': 'query'}}
 
 class SpanOr(Query):
     name = 'span_or'
-    _params_def = {'clauses': {'type': 'query', 'multi': True}}
+    _param_defs = {'clauses': {'type': 'query', 'multi': True}}
 
+class FieldMaskingSpan(Query):
+    name = 'field_masking_span'
+    _param_defs = {'query': {'type': 'query'}}
+
+class SpanContainining(Query):
+    name = 'span_containing'
+    _param_defs = {'little': {'type': 'query'}, 'big': {'type': 'query'}}
+
+class SpanWithin(Query):
+    name = 'span_within'
+    _param_defs = {'little': {'type': 'query'}, 'big': {'type': 'query'}}
 
 # core queries
 class Common(Query):
@@ -327,3 +341,6 @@ class Script(Query):
 
 class Type(Query):
     name = 'type'
+
+class ParentId(Query):
+    name = 'parent_id'

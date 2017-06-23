@@ -8,7 +8,7 @@ from elasticsearch.exceptions import TransportError
 
 from .query import Q, EMPTY_QUERY, Bool
 from .aggs import A, AggBase
-from .utils import DslBase
+from .utils import DslBase, AttrDict
 from .response import Response, Hit, SuggestResponse
 from .connections import connections
 
@@ -45,6 +45,12 @@ class QueryProxy(object):
             self._proxied = Q(self._proxied.to_dict())
             setattr(self._proxied, attr_name, value)
         super(QueryProxy, self).__setattr__(attr_name, value)
+
+    def __getstate__(self):
+        return (self._search, self._proxied, self._attr_name)
+
+    def __setstate__(self, state):
+        self._search, self._proxied, self._attr_name = state
 
 
 class ProxyDescriptor(object):
@@ -101,6 +107,15 @@ class Request(object):
 
         self._params = {}
         self._extra = extra or {}
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, Request) and
+            other._params == self._params and
+            other._index == self._index and
+            other._doc_type == self._doc_type and
+            other.to_dict() == self.to_dict()
+        )
 
     def params(self, **kwargs):
         """
@@ -232,6 +247,9 @@ class Search(Request):
 
     def filter(self, *args, **kwargs):
         return self.query(Bool(filter=[Q(*args, **kwargs)]))
+
+    def exclude(self, *args, **kwargs):
+        return self.query(Bool(filter=[~Q(*args, **kwargs)]))
 
     def __iter__(self):
         """
@@ -477,7 +495,7 @@ class Search(Request):
     def highlight(self, *fields, **kwargs):
         """
         Request highlighting of some fields. All keyword arguments passed in will be
-        used as parameters. Example::
+        used as parameters for all the fields in the ``fields`` parameter. Example::
 
             Search().highlight('title', 'body', fragment_size=50)
 
@@ -487,6 +505,20 @@ class Search(Request):
                 "highlight": {
                     "fields": {
                         "body": {"fragment_size": 50},
+                        "title": {"fragment_size": 50}
+                    }
+                }
+            }
+
+        If you want to have different options for different fields you can call ``highlight`` twice::
+
+            Search().highlight('title', fragment_size=50).highlight('body', fragment_size=100)
+
+        which will produce::
+            {
+                "highlight": {
+                    "fields": {
+                        "body": {"fragment_size": 100},
                         "title": {"fragment_size": 50}
                     }
                 }
@@ -619,8 +651,8 @@ class Search(Request):
         pass to the underlying ``scan`` helper from ``elasticsearch-py`` -
         https://elasticsearch-py.readthedocs.io/en/master/helpers.html#elasticsearch.helpers.scan
 
-        :arg raw: set to True to get raw result dict from elasticsearch. 
-        
+        :arg raw: set to True to get raw result dict from elasticsearch.
+
         """
         es = connections.get_connection(self._using)
 
@@ -630,8 +662,30 @@ class Search(Request):
                 index=self._index,
                 doc_type=self._doc_type,
                 **self._params
-        ):
-            yield self._doc_type_map.get(hit['_type'], Hit)(hit) if not raw else hit
+            ):
+            if not raw:
+                callback = self._doc_type_map.get(hit['_type'], Hit)
+                callback = getattr(callback, 'from_es', callback)
+                yield callback(hit)
+            else:
+                yield hit
+
+    def delete(self):
+        """
+        delete() executes the query by delegating to delete_by_query()
+        """
+
+        es = connections.get_connection(self._using)
+
+        return AttrDict(
+            es.delete_by_query(
+                index=self._index,
+                body=self.to_dict(),
+                doc_type=self._doc_type,
+                **self._params
+            )
+        )
+
 
 
 class MultiSearch(Request):
