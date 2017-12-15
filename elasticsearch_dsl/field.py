@@ -200,6 +200,7 @@ class InnerObject(object):
 class Object(InnerObject, Field):
     name = 'object'
 
+
 class Nested(InnerObject, Field):
     name = 'nested'
 
@@ -208,14 +209,15 @@ class Nested(InnerObject, Field):
         kwargs.setdefault('multi', True)
         super(Nested, self).__init__(*args, **kwargs)
 
+
 class Date(Field):
     name = 'date'
     _coerce = True
 
     def _serialize(self, data):
         if self._params.get('format') == 'epoch_second' and isinstance(data, datetime):
-            utc_naive  = data.replace(tzinfo=None) - data.utcoffset()
-            return (utc_naive - datetime(1970, 1, 1)).total_seconds()
+            utc_naive = data.replace(tzinfo=None) - data.utcoffset()
+            return int((utc_naive - datetime(1970, 1, 1)).total_seconds())
         return super(Date, self)._serialize(data)
 
     def _deserialize(self, data):
@@ -232,6 +234,7 @@ class Date(Field):
         except Exception as e:
             raise ValidationException('Could not parse date from the value (%r)' % data, e)
 
+
 class String(Field):
     _param_defs = {
         'fields': {'type': 'field', 'hash': True},
@@ -239,6 +242,7 @@ class String(Field):
         'search_analyzer': {'type': 'analyzer'},
     }
     name = 'string'
+
 
 class Text(Field):
     _param_defs = {
