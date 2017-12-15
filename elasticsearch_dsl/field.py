@@ -212,6 +212,12 @@ class Date(Field):
     name = 'date'
     _coerce = True
 
+    def _serialize(self, data):
+        if self._params.get('format') == 'epoch_second' and isinstance(data, datetime):
+            utc_naive  = data.replace(tzinfo=None) - data.utcoffset()
+            return (utc_naive - datetime(1970, 1, 1)).total_seconds()
+        return super(Date, self)._serialize(data)
+
     def _deserialize(self, data):
         if not data:
             return None
