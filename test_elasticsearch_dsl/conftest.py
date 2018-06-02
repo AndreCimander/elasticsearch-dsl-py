@@ -1,43 +1,36 @@
 # -*- coding: utf-8 -*-
 
 import os
+from datetime import datetime
 
-from elasticsearch.helpers.test import get_test_client, SkipTest
 from elasticsearch.helpers import bulk
-
-from pytest import fixture, yield_fixture, skip
+from elasticsearch.helpers.test import SkipTest, get_test_client
 from mock import Mock
+from pytest import fixture, skip
 
-from .test_integration.test_data import DATA, create_git_index
+from elasticsearch_dsl.connections import connections
+from .test_integration.test_data import DATA, FLAT_DATA, create_git_index, \
+    create_flat_git_index
+from .test_integration.test_document import PullRequest, Comment, User
 
-_client_loaded = False
 
 @fixture(scope='session')
-def client(request):
-    # inner import to avoid throwing off coverage
-    from elasticsearch_dsl.connections import connections
-    # hack to workaround pytest not caching skip on fixtures (#467)
-    global _client_loaded
-    if _client_loaded:
-        skip()
-
-    _client_loaded = True
+def client():
     try:
-        client = get_test_client(nowait='WAIT_FOR_ES' not in os.environ)
-        connections.add_connection('default', client)
-        return client
+        connection = get_test_client(nowait='WAIT_FOR_ES' not in os.environ)
+        connections.add_connection('default', connection)
+        return connection
     except SkipTest:
         skip()
 
-@yield_fixture
-def write_client(request, client):
+@fixture
+def write_client(client):
     yield client
     client.indices.delete('test-*', ignore=404)
+    client.indices.delete_template('test-template', ignore=404)
 
-@yield_fixture
-def mock_client(request):
-    # inner import to avoid throwing off coverage
-    from elasticsearch_dsl.connections import connections
+@fixture
+def mock_client():
     client = Mock()
     client.search.return_value = dummy_response()
     connections.add_connection('mock', client)
@@ -46,14 +39,16 @@ def mock_client(request):
     connections._kwargs = {}
 
 @fixture(scope='session')
-def data_client(request, client):
+def data_client(client):
     # create mappings
     create_git_index(client, 'git')
+    create_flat_git_index(client, 'flat-git')
     # load data
     bulk(client, DATA, raise_on_error=True, refresh=True)
-    # make sure we clean up after ourselves
-    request.addfinalizer(lambda: client.indices.delete('git'))
-    return client
+    bulk(client, FLAT_DATA, raise_on_error=True, refresh=True)
+    yield client
+    client.indices.delete('git')
+    client.indices.delete('flat-git')
 
 @fixture
 def dummy_response():
@@ -81,7 +76,7 @@ def dummy_response():
             "_type": "employee",
             "_id": "42",
             "_score": 11.123,
-            "_parent": "elasticsearch",
+            "_routing": "elasticsearch",
 
             "_source": {
               "name": {
@@ -97,7 +92,7 @@ def dummy_response():
             "_type": "employee",
             "_id": "47",
             "_score": 1,
-            "_parent": "elasticsearch",
+            "_routing": "elasticsearch",
 
             "_source": {
               "name": {
@@ -113,7 +108,7 @@ def dummy_response():
             "_type": "employee",
             "_id": "53",
             "_score": 16.0,
-            "_parent": "elasticsearch",
+            "_routing": "elasticsearch",
           },
         ],
         "max_score": 12.0,
@@ -126,7 +121,7 @@ def dummy_response():
 @fixture
 def aggs_search():
     from elasticsearch_dsl import Search
-    s = Search(index='git', doc_type='commits')
+    s = Search(index='flat-git')
     s.aggs\
         .bucket('popular_files', 'terms', field='files', size=2)\
         .metric('line_stats', 'stats', field='stats.lines')\
@@ -163,27 +158,23 @@ def aggs_data():
                                 'hits': [
                                     {
                                         '_id': '3ca6e1e73a071a705b4babd2f581c91a2a3e5037',
-                                        '_type': 'commits',
+                                        '_type': 'doc',
                                         '_source': {
                                             'stats': {'files': 4, 'deletions': 7, 'lines': 30, 'insertions': 23},
                                             'committed_date': '2014-05-02T13:47:19'
                                         },
                                         '_score': 1.0,
-                                        '_parent': 'elasticsearch-dsl-py',
-                                        '_routing': 'elasticsearch-dsl-py',
-                                        '_index': 'git'
+                                        '_index': 'flat-git'
                                     },
                                     {
                                         '_id': 'eb3e543323f189fd7b698e66295427204fff5755',
-                                        '_type': 'commits',
+                                        '_type': 'doc',
                                         '_source': {
                                             'stats': {'files': 1, 'deletions': 0, 'lines': 18, 'insertions': 18},
                                             'committed_date': '2014-05-01T13:32:14'
                                         },
                                         '_score': 1.0,
-                                        '_parent': 'elasticsearch-dsl-py',
-                                        '_routing': 'elasticsearch-dsl-py',
-                                        '_index': 'git'
+                                        '_index': 'flat-git'
                                     }
                                 ],
                                 'max_score': 1.0
@@ -200,26 +191,22 @@ def aggs_data():
                                 'hits': [
                                     {
                                         '_id': '3ca6e1e73a071a705b4babd2f581c91a2a3e5037',
-                                        '_type': 'commits',
+                                        '_type': 'doc',
                                         '_source': {
                                             'stats': {'files': 4, 'deletions': 7, 'lines': 30, 'insertions': 23},
                                             'committed_date': '2014-05-02T13:47:19'
                                         },
                                         '_score': 1.0,
-                                        '_parent': 'elasticsearch-dsl-py',
-                                        '_routing': 'elasticsearch-dsl-py',
-                                        '_index': 'git'
+                                        '_index': 'flat-git'
                                     }, {
                                         '_id': 'dd15b6ba17dd9ba16363a51f85b31f66f1fb1157',
-                                        '_type': 'commits',
+                                        '_type': 'doc',
                                         '_source': {
                                             'stats': {'files': 3, 'deletions': 18, 'lines': 62, 'insertions': 44},
                                             'committed_date': '2014-05-01T13:30:44'
                                         },
                                         '_score': 1.0,
-                                        '_parent': 'elasticsearch-dsl-py',
-                                        '_routing': 'elasticsearch-dsl-py',
-                                        '_index': 'git'
+                                        '_index': 'flat-git'
                                     }
                                 ],
                                 'max_score': 1.0
@@ -232,3 +219,16 @@ def aggs_data():
             }
         }
     }
+
+@fixture
+def pull_request(write_client):
+    PullRequest.init()
+    pr = PullRequest(_id=42,
+                     comments=[
+                         Comment(content='Hello World!',
+                                 author=User(name='honzakral'),
+                                 created_at=datetime(2018, 1, 9, 10, 17, 3, 21184)),
+                     ],
+                     created_at=datetime(2018, 1, 9, 9, 17, 3, 21184))
+    pr.save(refresh=True)
+    return pr

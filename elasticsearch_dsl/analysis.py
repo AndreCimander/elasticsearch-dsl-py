@@ -1,7 +1,7 @@
 from .utils import DslBase
 
 __all__ = [
-    'tokenizer', 'analyzer', 'char_filter', 'token_filter'
+    'tokenizer', 'analyzer', 'char_filter', 'token_filter', 'normalizer'
 ]
 
 class AnalysisBase(object):
@@ -19,9 +19,9 @@ class AnalysisBase(object):
 
 class CustomAnalysis(object):
     name = 'custom'
-    def __init__(self, name, builtin_type='custom', **kwargs):
+    def __init__(self, filter_name, builtin_type='custom', **kwargs):
         self._builtin_type = builtin_type
-        self._name = name
+        self._name = filter_name
         super(CustomAnalysis, self).__init__(**kwargs)
 
     def to_dict(self):
@@ -33,6 +33,26 @@ class CustomAnalysis(object):
         d = d.pop(self.name)
         d['type'] = self._builtin_type
         return d
+
+class CustomAnalysisDefinition(CustomAnalysis):
+    def get_analysis_definition(self):
+        out = {self._type_name: {self._name: self.get_definition()}}
+
+        t = getattr(self, 'tokenizer', None)
+        if 'tokenizer' in self._param_defs and hasattr(t, 'get_definition'):
+            out['tokenizer'] = {t._name: t.get_definition()}
+
+        filters = dict((f._name, f.get_definition())
+                       for f in self.filter if hasattr(f, 'get_definition'))
+        if filters:
+            out['filter'] = filters
+
+        char_filters = dict((f._name, f.get_definition())
+                            for f in self.char_filter if hasattr(f, 'get_definition'))
+        if char_filters:
+            out['char_filter'] = char_filters
+
+        return out
 
 class BuiltinAnalysis(object):
     name = 'builtin'
@@ -52,33 +72,26 @@ class BuiltinAnalyzer(BuiltinAnalysis, Analyzer):
     def get_analysis_definition(self):
         return {}
 
-class CustomAnalyzer(CustomAnalysis, Analyzer):
+class CustomAnalyzer(CustomAnalysisDefinition, Analyzer):
     _param_defs = {
         'filter': {'type': 'token_filter', 'multi': True},
         'char_filter': {'type': 'char_filter', 'multi': True},
         'tokenizer': {'type': 'tokenizer'},
     }
 
+class Normalizer(AnalysisBase, DslBase):
+    _type_name = 'normalizer'
+    name = None
+
+class BuiltinNormalizer(BuiltinAnalysis, Normalizer):
     def get_analysis_definition(self):
-        out = {'analyzer': {self._name: self.get_definition()}}
+        return {}
 
-        t = getattr(self, 'tokenizer', None)
-        if hasattr(t, 'get_definition'):
-            out['tokenizer'] = {t._name: t.get_definition()}
-
-        filters = dict((f._name, f.get_definition())
-                for f in self.filter if hasattr(f, 'get_definition'))
-        if filters:
-            out['filter'] = filters
-
-
-        char_filters = dict((f._name, f.get_definition())
-                for f in self.char_filter if hasattr(f, 'get_definition'))
-        if char_filters:
-            out['char_filter'] = char_filters
-
-        return out
-
+class CustomNormalizer(CustomAnalysisDefinition, Normalizer):
+    _param_defs = {
+        'filter': {'type': 'token_filter', 'multi': True},
+        'char_filter': {'type': 'char_filter', 'multi': True}
+    }
 
 class Tokenizer(AnalysisBase, DslBase):
     _type_name = 'tokenizer'
@@ -113,9 +126,9 @@ class CustomCharFilter(CustomAnalysis, CharFilter):
     pass
 
 
-
 # shortcuts for direct use
 analyzer = Analyzer._type_shortcut
 tokenizer = Tokenizer._type_shortcut
 token_filter = TokenFilter._type_shortcut
 char_filter = CharFilter._type_shortcut
+normalizer = Normalizer._type_shortcut

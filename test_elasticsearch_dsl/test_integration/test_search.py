@@ -3,10 +3,10 @@ from __future__ import unicode_literals
 from elasticsearch import TransportError
 
 from elasticsearch_dsl import Search, DocType, Date, Text, Keyword, MultiSearch, \
-    MetaField, Index, Q
+    Index, Q
 from elasticsearch_dsl.response import aggs
 
-from .test_data import DATA
+from .test_data import FLAT_DATA
 
 from pytest import raises
 
@@ -15,15 +15,16 @@ class Repository(DocType):
     description = Text(analyzer='snowball')
     tags = Keyword()
 
+    @classmethod
+    def search(cls):
+        return super(Repository, cls).search().filter('term', commit_repo='repo')
+
     class Meta:
         index = 'git'
-        doc_type = 'repos'
 
 class Commit(DocType):
     class Meta:
-        doc_type = 'commits'
-        index = 'git'
-        parent = MetaField(type='repos')
+        index = 'flat-git'
 
 def test_filters_aggregation_buckets_are_accessible(data_client):
     has_tests_query = Q('term', files='test_elasticsearch_dsl')
@@ -53,33 +54,12 @@ def test_top_hits_are_wrapped_in_response(data_client):
 
 
 def test_inner_hits_are_wrapped_in_response(data_client):
-    s = Search(index='git', doc_type='commits')[0:1].query('has_parent', type='repos', inner_hits={}, query=Q('match_all'))
+    s = Search(index='git')[0:1].query('has_parent', parent_type='repo', inner_hits={}, query=Q('match_all'))
     response = s.execute()
 
     commit = response.hits[0]
-    assert isinstance(commit.meta.inner_hits.repos, response.__class__)
-    assert repr(commit.meta.inner_hits.repos[0]).startswith("<Hit(repos/elasticsearch-dsl-py): ")
-
-def test_inner_hits_are_wrapped_in_doc_type(data_client):
-    i = Index('git')
-    i.doc_type(Repository)
-    i.doc_type(Commit)
-    s = i.search()[0:1].doc_type(Commit).query('has_parent', type='repos', inner_hits={}, query=Q('match_all'))
-    response = s.execute()
-
-    commit = response.hits[0]
-    assert isinstance(commit.meta.inner_hits.repos, response.__class__)
-    assert isinstance(commit.meta.inner_hits.repos[0], Repository)
-    assert "Repository(index=%r, doc_type=%r, id=%r)" % ('git', 'repos', 'elasticsearch-dsl-py') == repr(commit.meta.inner_hits.repos[0])
-
-
-def test_suggest_can_be_run_separately(data_client):
-    s = Search(index='git')
-    s = s.suggest('simple_suggestion', 'elasticserach', term={'field': 'organization'})
-    response = s.execute_suggest()
-
-    assert response.success()
-    assert response.simple_suggestion[0].options[0].text == 'elasticsearch'
+    assert isinstance(commit.meta.inner_hits.repo, response.__class__)
+    assert repr(commit.meta.inner_hits.repo[0]).startswith("<Hit(git/doc/elasticsearch-dsl-py): ")
 
 def test_scan_respects_doc_types(data_client):
     repos = list(Repository.search().scan())
@@ -89,12 +69,12 @@ def test_scan_respects_doc_types(data_client):
     assert repos[0].organization == 'elasticsearch'
 
 def test_scan_iterates_through_all_docs(data_client):
-    s = Search(index='git').filter('term', _type='commits')
+    s = Search(index='flat-git')
 
     commits = list(s.scan())
 
     assert 52 == len(commits)
-    assert set(d['_id'] for d in DATA if d['_type'] == 'commits') == set(c.meta.id for c in commits)
+    assert set(d['_id'] for d in FLAT_DATA) == set(c.meta.id for c in commits)
 
 def test_response_is_cached(data_client):
     s = Repository.search()
@@ -105,9 +85,9 @@ def test_response_is_cached(data_client):
 
 def test_multi_search(data_client):
     s1 = Repository.search()
-    s2 = Search(doc_type='commits')
+    s2 = Search(index='flat-git')
 
-    ms = MultiSearch(index='git')
+    ms = MultiSearch()
     ms = ms.add(s1).add(s2)
 
     r1, r2 = ms.execute()
@@ -121,7 +101,7 @@ def test_multi_search(data_client):
 
 def test_multi_missing(data_client):
     s1 = Repository.search()
-    s2 = Search(doc_type='commits')
+    s2 = Search(index='flat-git')
     s3 = Search(index='does_not_exist')
 
     ms = MultiSearch()
@@ -142,7 +122,7 @@ def test_multi_missing(data_client):
     assert r3 is None
 
 def test_raw_subfield_can_be_used_in_aggs(data_client):
-    s = Search(index='git', doc_type='commits')[0:0]
+    s = Search(index='git')[0:0]
     s.aggs.bucket('authors', 'terms', field='author.name.raw', size=1)
 
     r = s.execute()

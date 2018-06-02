@@ -15,8 +15,15 @@ def test_attrlist_pickle():
     pickled_al = pickle.dumps(al)
     assert al == pickle.loads(pickled_al)
 
+def test_attrlist_slice():
+    class MyAttrDict(utils.AttrDict):
+        pass
+
+    l = utils.AttrList([{}, {}], obj_wrapper=MyAttrDict)
+    assert isinstance(l[:][0], MyAttrDict)
+
 def test_merge():
-    a = {'a': {'b': 42, 'c': 47}}
+    a = utils.AttrDict({'a': {'b': 42, 'c': 47}})
     b = {'a': {'b': 123, 'd': -12}, 'e': [1, 2, 3]}
 
     utils.merge(a, b)
@@ -41,7 +48,7 @@ def test_attrlist_items_get_wrapped_during_iteration():
 def test_serializer_deals_with_Attr_versions():
     d = utils.AttrDict({'key': utils.AttrList([1, 2, 3])})
 
-    assert serializer.serializer.dumps(d) == '{"key": [1, 2, 3]}'
+    assert serializer.serializer.dumps(d) == serializer.serializer.dumps({'key': [1, 2, 3]})
 
 def test_serializer_deals_with_objects_with_to_dict():
     class MyClass(object):

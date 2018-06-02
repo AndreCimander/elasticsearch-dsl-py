@@ -1,20 +1,19 @@
 import collections
 
-from six import iteritems
+from six import iteritems, itervalues
 from itertools import chain
 
 from .utils import DslBase
-from .field import InnerObject, Text
+from .field import Text, construct_field
 from .connections import connections
-from .exceptions import IllegalOperation
-from .index import Index
 
 META_FIELDS = frozenset((
     'dynamic', 'transform', 'dynamic_date_formats', 'date_detection',
     'numeric_detection', 'dynamic_templates', 'enabled'
 ))
 
-class Properties(InnerObject, DslBase):
+class Properties(DslBase):
+    _param_defs = {'properties': {'type': 'field', 'hash': True}}
     def __init__(self, name):
         self._name = name
         super(Properties, self).__init__()
@@ -22,9 +21,45 @@ class Properties(InnerObject, DslBase):
     def __repr__(self):
         return 'Properties(%r)' % self._name
 
+    def __getitem__(self, name):
+        return self.properties[name]
+
+    def __contains__(self, name):
+        return name in self.properties
+
     @property
     def name(self):
         return self._name
+
+    def field(self, name, *args, **kwargs):
+        self.properties[name] = construct_field(*args, **kwargs)
+        return self
+
+    def _collect_fields(self):
+        " Iterate over all Field objects within, including multi fields. "
+        for f in itervalues(self.properties.to_dict()):
+            yield f
+            # multi fields
+            if hasattr(f, 'fields'):
+                for inner_f in itervalues(f.fields.to_dict()):
+                    yield inner_f
+            # nested and inner objects
+            if hasattr(f, '_collect_fields'):
+                for inner_f in f._collect_fields():
+                    yield inner_f
+
+    def update(self, other_object):
+        if not hasattr(other_object, 'properties'):
+            # not an inner/nested object, no merge possible
+            return
+
+        our, other = self.properties, other_object.properties
+        for name in other:
+            if name in our:
+                if hasattr(our[name], 'update'):
+                    our[name].update(other[name])
+                continue
+            our[name] = other[name]
 
 
 class Mapping(object):
@@ -57,7 +92,7 @@ class Mapping(object):
             fields.append(Text(**self._meta['_all']))
 
         for f in chain(fields, self.properties._collect_fields()):
-            for analyzer_name in ('analyzer', 'search_analyzer', 'search_quote_analyzer'):
+            for analyzer_name in ('analyzer', 'normalizer', 'search_analyzer', 'search_quote_analyzer'):
                 if not hasattr(f, analyzer_name):
                     continue
                 analyzer = getattr(f, analyzer_name)
@@ -74,7 +109,8 @@ class Mapping(object):
         return analysis
 
     def save(self, index, using='default'):
-        index = Index(index, using=using)
+        from .index import Index
+        index = Index(index, doc_type=self.doc_type, using=using)
         index.mapping(self)
         return index.save()
 
@@ -82,9 +118,11 @@ class Mapping(object):
         es = connections.get_connection(using)
         raw = es.indices.get_mapping(index=index, doc_type=self.doc_type)
         _, raw = raw.popitem()
-        raw = raw['mappings'][self.doc_type]
+        self._update_from_dict(raw['mappings'])
 
-        for name, definition in iteritems(raw['properties']):
+    def _update_from_dict(self, raw):
+        raw = raw[self.doc_type]
+        for name, definition in iteritems(raw.get('properties', {})):
             self.field(name, definition)
 
         # metadata like _all etc

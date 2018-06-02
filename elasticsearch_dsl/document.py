@@ -1,5 +1,5 @@
 import collections
-import re
+from fnmatch import fnmatch
 import logging
 from time import sleep
 
@@ -8,24 +8,11 @@ from six import iteritems, add_metaclass
 
 from .field import Field
 from .mapping import Mapping
-from .utils import ObjectBase, AttrDict, merge
+from .utils import ObjectBase, AttrDict, merge, DOC_META_FIELDS, META_FIELDS
 from .response import HitMeta
 from .search import Search
 from .connections import connections
 from .exceptions import ValidationException, IllegalOperation
-
-DELETE_META_FIELDS = frozenset((
-    'id', 'parent', 'routing', 'version', 'version_type'
-))
-
-DOC_META_FIELDS = frozenset((
-    'timestamp', 'ttl'
-)).union(DELETE_META_FIELDS)
-
-META_FIELDS = frozenset((
-    # Elasticsearch metadata fields, except 'type'
-    'index', 'using', 'score',
-)).union(DOC_META_FIELDS)
 
 
 class MetaField(object):
@@ -50,10 +37,8 @@ class DocTypeOptions(object):
         # default cluster alias, can be overriden in doc.meta
         self._using = getattr(meta, 'using', None)
 
-        # get doc_type name, if not defined take the name of the class and
-        # transform it to lower_case
-        doc_type = getattr(meta, 'doc_type',
-                re.sub(r'(.)([A-Z])', r'\1_\2', name).lower())
+        # get doc_type name, if not defined use 'doc'
+        doc_type = getattr(meta, 'doc_type', 'doc')
 
         # create the mapping instance
         self.mapping = getattr(meta, 'mapping', Mapping(doc_type))
@@ -78,6 +63,9 @@ class DocTypeOptions(object):
                 self._using = self._using or b._doc_type._using
                 self.index = self.index or b._doc_type.index
 
+        # custom method to determine if a hit belongs to this DocType
+        self._matches = getattr(meta, 'matches', None)
+
     @property
     def using(self):
         return self._using or 'default'
@@ -85,12 +73,6 @@ class DocTypeOptions(object):
     @property
     def name(self):
         return self.mapping.properties.name
-
-    @property
-    def parent(self):
-        if '_parent' in self.mapping._meta:
-            return self.mapping._meta['_parent']['type']
-        return
 
     def resolve_field(self, field_path):
         return self.mapping.resolve_field(field_path)
@@ -100,6 +82,30 @@ class DocTypeOptions(object):
 
     def refresh(self, index=None, using=None):
         self.mapping.update_from_es(index or self.index, using=using or self.using)
+
+    def matches(self, hit):
+        if self._matches is not None:
+            return self._matches(hit)
+
+        return (
+                self.index is None or fnmatch(hit.get('_index', ''), self.index)
+            ) and self.name == hit.get('_type')
+
+
+@add_metaclass(DocTypeMeta)
+class InnerDoc(ObjectBase):
+    """
+    Common class for inner documents like Object or Nested
+    """
+    @classmethod
+    def from_es(cls, data):
+        doc = cls()
+        m = cls._doc_type.mapping
+        for k, v in iteritems(data):
+            if k in m and m[k]._coerce:
+                v = m[k].deserialize(v)
+            setattr(doc, k, v)
+        return doc
 
 
 @add_metaclass(DocTypeMeta)
@@ -257,35 +263,14 @@ class DocType(ObjectBase):
 
         if error_docs:
             error_ids = [doc['_id'] for doc in error_docs]
-            message = 'Required routing/parent not provided for documents %s.'
+            message = 'Required routing not provided for documents %s.'
             message %= ', '.join(error_ids)
             raise RequestError(400, message, error_docs)
         if missing_docs:
             missing_ids = [doc['_id'] for doc in missing_docs]
             message = 'Documents %s not found.' % ', '.join(missing_ids)
-            raise NotFoundError(404, message, missing_docs)
+            raise NotFoundError(404, message, {'docs': missing_docs})
         return objs
-
-    @classmethod
-    def from_es(cls, hit):
-        """
-        Helper method to construct an instance from a dictionary returned by
-        elasticsearch.
-        """
-        # don't modify in place
-        meta = hit.copy()
-        doc = meta.pop('_source', {})
-
-        if 'fields' in meta:
-            for k, v in iteritems(meta.pop('fields')):
-                if k == '_source':
-                    doc.update(v)
-                if k.startswith('_') and k[1:] in META_FIELDS:
-                    meta[k] = v
-                else:
-                    doc[k] = v
-
-        return cls(meta=meta, **doc)
 
     def _get_connection(self, using=None):
         return connections.get_connection(using or self._doc_type.using)
@@ -310,10 +295,10 @@ class DocType(ObjectBase):
         ``Elasticsearch.delete`` unchanged.
         """
         es = self._get_connection(using)
-        # extract parent, routing etc from meta
+        # extract routing etc from meta
         doc_meta = dict(
             (k, self.meta[k])
-            for k in DELETE_META_FIELDS
+            for k in DOC_META_FIELDS
             if k in self.meta
         )
         doc_meta.update(kwargs)
@@ -323,7 +308,7 @@ class DocType(ObjectBase):
             **doc_meta
         )
 
-    def to_dict(self, include_meta=False):
+    def to_dict(self, include_meta=False, skip_empty=True):
         """
         Serialize the instance into a dictionary so that it can be saved in elasticsearch.
 
@@ -331,8 +316,11 @@ class DocType(ObjectBase):
             (``_index``, ``_type``, ``_id`` etc). Otherwise just the document's
             data is serialized. This is useful when passing multiple instances into
             ``elasticsearch.helpers.bulk``.
+        :arg skip_empty: if set to ``False`` will cause empty values (``None``,
+            ``[]``, ``{}``) to be left on the document. Those values will be
+            stripped out otherwise as they make no difference in elasticsearch.
         """
-        d = super(DocType, self).to_dict()
+        d = super(DocType, self).to_dict(skip_empty=skip_empty)
         if not include_meta:
             return d
 
@@ -352,7 +340,8 @@ class DocType(ObjectBase):
         meta['_source'] = d
         return meta
 
-    def update(self, using=None, index=None,  detect_noop=True, doc_as_upsert=False, all_fields=False, **fields):
+    def update(self, using=None, index=None,  detect_noop=True,
+               doc_as_upsert=False, refresh=False, all_fields=False, **fields):
         """
         Partial update of the document, specify fields you wish to update and
         both the instance and the document in elasticsearch will be updated::
@@ -378,7 +367,7 @@ class DocType(ObjectBase):
         es = self._get_connection(using)
 
         # update given fields locally
-        merge(self._d_, fields)
+        merge(self, fields)
 
         # prepare data for ES
         doc = self.to_dict()
@@ -390,7 +379,7 @@ class DocType(ObjectBase):
                 for k in fields.keys()
             )
 
-        # extract parent, routing etc from meta
+        # extract routing etc from meta
         doc_meta = dict(
             (k, self.meta[k])
             for k in DOC_META_FIELDS
@@ -406,6 +395,7 @@ class DocType(ObjectBase):
             index=self._get_index(index),
             doc_type=self._doc_type.name,
             body=body,
+            refresh=refresh,
             **doc_meta
         )
         # update meta information from ES
@@ -431,7 +421,7 @@ class DocType(ObjectBase):
             self.full_clean()
 
         es = self._get_connection(using)
-        # extract parent, routing etc from meta
+        # extract routing etc from meta
         doc_meta = dict(
             (k, self.meta[k])
             for k in DOC_META_FIELDS
@@ -450,4 +440,4 @@ class DocType(ObjectBase):
                 setattr(self.meta, k, meta['_' + k])
 
         # return True/False if the document has been created/updated
-        return meta['created']
+        return meta['result'] == 'created'

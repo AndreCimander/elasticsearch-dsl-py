@@ -3,6 +3,64 @@
 Changelog
 =========
 
+6.2.0 (dev)
+-----------
+
+* Implemented ``NestedFacet`` for ``FacetedSearch``. This brought a need to
+  slightly change the semantics of ``Facet.get_values`` which now expects the
+  whole data dict for the aggregation, not just the ``buckets``. This is
+  a backwards incompatible change for custom aggregations that redefine that
+  method.
+* ``DocType.update`` now supports ``refresh`` kwarg
+* ``DslBase._clone`` now produces a shallow copy, this means that modifying an
+  existing query can have effects on existing ``Search`` objects.
+
+6.1.0 (2018-01-09)
+------------------
+
+* Removed ``String`` field.
+* Fixed issue with ``Object``/``Nested`` deserialization
+
+6.0.1 (2018-01-02)
+------------------
+
+Fixing wheel package for Python 2.7 (#803)
+
+6.0.0 (2018-01-01)
+------------------
+
+Backwards incompatible release compatible with elasticsearch 6.0, changes
+include:
+
+ * use ``doc`` as default ``DocType`` name, this change includes:
+   * ``DocType._doc_type.matches`` method is now used to determine which
+   ``DocType`` should be used for a hit instead of just checking ``_type``
+ * ``Nested`` and ``Object`` field refactoring using newly introduced
+   ``InnerDoc`` class. To define a ``Nested``/``Object`` field just define the
+   ``InnerDoc`` subclass and then use it when defining the field::
+
+      class Comment(InnerDoc):
+          body = Text()
+          created_at = Date()
+
+      class Blog(DocType):
+          comments = Nested(Comment)
+
+ * methods on ``connections`` singleton are now exposed on the ``connections``
+   module directly.
+ * field values are now only deserialized when coming from elasticsearch (via
+   ``from_es`` method) and not when assigning values in python (either by
+   direct assignment or in ``__init__``).
+
+5.4.0 (2017-12-06)
+------------------
+ * fix ``ip_range`` aggregation and rename the class to ``IPRange``.
+   ``Iprange`` is kept for bw compatibility
+ * fix bug in loading an aggregation with meta data from dict
+ * add support for ``normalizer`` parameter of ``Keyword`` fields
+ * ``IndexTemplate`` can now be specified using the same API as ``Index``
+ * ``Boolean`` field now accepts ``"false"`` as ``False``
+
 5.3.0 (2017-05-18)
 ------------------
  * fix constant score query definition

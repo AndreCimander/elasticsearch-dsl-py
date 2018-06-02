@@ -1,38 +1,49 @@
-from elasticsearch_dsl import DocType, Index, Text, Keyword, Date, analysis
+from elasticsearch_dsl import DocType, Index, Text, Keyword, Date, analysis, IndexTemplate
 
 class Post(DocType):
     title = Text(analyzer=analysis.analyzer('my_analyzer', tokenizer='keyword'))
     published_from = Date()
 
-class User(DocType):
-    username = Keyword()
-    joined_date = Date()
+def test_index_template_works(write_client):
+    it = IndexTemplate('test-template', 'test-*')
+    it.doc_type(Post)
+    it.settings(number_of_replicas=0, number_of_shards=1)
+    it.save()
 
-def test_index_exists(write_client):
+    i = Index('test-blog')
+    i.create()
 
+    assert {
+        'test-blog': {
+            'mappings': {
+                'doc': {
+                    'properties': {
+                        'title': {'type': 'text', 'analyzer': 'my_analyzer'},
+                        'published_from': {'type': 'date'},
+                    }
+                },
+            }
+        }
+    } == write_client.indices.get_mapping(index='test-blog')
+
+
+def test_index_exists(data_client):
     assert Index('git').exists()
     assert not Index('not-there').exists()
 
 def test_index_can_be_created_with_settings_and_mappings(write_client):
     i = Index('test-blog', using=write_client)
     i.doc_type(Post)
-    i.doc_type(User)
     i.settings(number_of_replicas=0, number_of_shards=1)
     i.create()
 
     assert {
         'test-blog': {
             'mappings': {
-                'post': {
+                'doc': {
                     'properties': {
                         'title': {'type': 'text', 'analyzer': 'my_analyzer'},
                         'published_from': {'type': 'date'}
-                    }
-                },
-                'user': {
-                    'properties': {
-                        'username': {'type': 'keyword'},
-                        'joined_date': {'type': 'date'}
                     }
                 },
             }

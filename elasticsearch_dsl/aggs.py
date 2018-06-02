@@ -17,14 +17,19 @@ def A(name_or_agg, filter=None, **params):
         agg = name_or_agg.copy()
         # pop out nested aggs
         aggs = agg.pop('aggs', None)
+        # pop out meta data
+        meta = agg.pop('meta', None)
         # should be {"terms": {"field": "tags"}}
         if len(agg) != 1:
             raise ValueError('A() can only accept dict with an aggregation ({"terms": {...}}). '
-                 'Instead it got (%r)' % name_or_agg)
+                             'Instead it got (%r)' % name_or_agg)
         agg_type, params = agg.popitem()
         if aggs:
             params = params.copy()
             params['aggs'] = aggs
+        if meta:
+            params = params.copy()
+            params['meta'] = meta
         return Agg.get_dsl_class(agg_type)(_expand__to_dot=False, **params)
 
     # Terms(...) just return the nested agg
@@ -62,7 +67,7 @@ class AggBase(object):
         return key in self._params.get('aggs', {})
 
     def __getitem__(self, agg_name):
-        agg = self._params.setdefault('aggs', {})[agg_name] # propagate KeyError
+        agg = self._params.setdefault('aggs', {})[agg_name]  # propagate KeyError
 
         # make sure we're not mutating a shared state - whenever accessing a
         # bucket, return a shallow copy of it to be safe
@@ -171,8 +176,8 @@ class Histogram(Bucket):
     def result(self, search, data):
         return FieldBucketData(self, search, data)
 
-class Iprange(Bucket):
-    name = 'iprange'
+class IPRange(Bucket):
+    name = 'ip_range'
 
 class Missing(Bucket):
     name = 'missing'
@@ -189,6 +194,9 @@ class ReverseNested(Bucket):
 class SignificantTerms(Bucket):
     name = 'significant_terms'
 
+class SignificantText(Bucket):
+    name = 'significant_text'
+
 class Terms(Bucket):
     name = 'terms'
 
@@ -197,6 +205,9 @@ class Terms(Bucket):
 
 class Sampler(Bucket):
     name = 'sampler'
+
+class DiversifiedSampler(Bucket):
+    name = 'diversified_sampler'
 
 # metric aggregations
 class TopHits(Agg):
@@ -280,3 +291,6 @@ class StatsBucket(Pipeline):
 
 class SumBucket(Pipeline):
     name = 'sum_bucket'
+
+class BucketSort(Pipeline):
+    name = 'bucket_sort'

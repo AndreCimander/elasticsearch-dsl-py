@@ -19,6 +19,24 @@ def test_analyzer_has_definition():
         'filter': ["lowercase"],
     } == a.get_definition()
 
+def test_normalizer_serializes_as_name():
+    n = analysis.normalizer('my_normalizer')
+
+    assert 'my_normalizer' == n.to_dict()
+
+def test_normalizer_has_definition():
+    n = analysis.CustomNormalizer(
+        'my_normalizer',
+        filter=['lowercase', 'asciifolding'],
+        char_filter=['quote']
+    )
+
+    assert {
+        'type': 'custom',
+        'filter': ['lowercase', 'asciifolding'],
+        'char_filter': ['quote']
+    } == n.get_definition()
+
 def test_tokenizer():
     t = analysis.tokenizer('trigram', 'nGram', min_gram=3, max_gram=3)
 
@@ -60,4 +78,12 @@ def test_custom_analyzer_can_collect_custom_items():
             'umlauts': umlauts.get_definition()
         }
     } == a.get_analysis_definition()
+
+def test_stemmer_analyzer_can_pass_name():
+    t = analysis.token_filter('my_english_filter', name="minimal_english", type="stemmer")
+    assert t.to_dict() == 'my_english_filter'
+    assert {
+        "type" : "stemmer",
+        "name" : "minimal_english"
+    } == t.get_definition()
 

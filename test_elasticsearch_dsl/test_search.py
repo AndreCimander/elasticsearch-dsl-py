@@ -1,6 +1,9 @@
 from copy import deepcopy
 
 from elasticsearch_dsl import search, query, Q, DocType, utils
+from elasticsearch_dsl.exceptions import IllegalOperation
+
+from pytest import raises
 
 
 def test_expand__to_dot_is_respected():
@@ -116,6 +119,15 @@ def test_source_copied_on_clone():
     assert s3._clone()._source == s3._source
     assert s3._clone()._source == ["some", "fields"]
 
+def test_copy_clones():
+    from copy import copy
+    s1 = search.Search().source(["some", "fields"])
+    s2 = copy(s1)
+
+    assert s1 == s2
+    assert s1 is not s2
+
+
 def test_aggs_get_copied_on_change():
     s = search.Search()
     s.aggs.bucket('per_tag', 'terms', field='f').metric('max_score', 'max', field='score')
@@ -150,6 +162,8 @@ def test_search_index():
     assert s._index == ['i']
     s = s.index('i2')
     assert s._index == ['i', 'i2']
+    s = s.index(u'i3')
+    assert s._index == ['i', 'i2', 'i3']
     s = s.index()
     assert s._index is None
     s = search.Search(index=('i', 'i2'))
@@ -162,6 +176,16 @@ def test_search_index():
     s2 = s.index('i3')
     assert s._index == ['i', 'i2']
     assert s2._index == ['i', 'i2', 'i3']
+    s = search.Search()
+    s = s.index(['i', 'i2'], 'i3')
+    assert s._index == ['i', 'i2', 'i3']
+    s2 = s.index('i4')
+    assert s._index == ['i', 'i2', 'i3']
+    assert s2._index == ['i', 'i2', 'i3', 'i4']
+    s2 = s.index(['i4'])
+    assert s2._index == ['i', 'i2', 'i3', 'i4']
+    s2 = s.index(('i4', 'i5'))
+    assert s2._index == ['i', 'i2', 'i3', 'i4', 'i5']
 
 def test_search_doc_type():
     s = search.Search(doc_type='i')
@@ -187,13 +211,14 @@ def test_doc_type_can_be_document_class():
         pass
 
     s = search.Search(doc_type=MyDocType)
-    assert s._doc_type == ['my_doc_type']
-    assert s._doc_type_map == {'my_doc_type': MyDocType}
+    assert s._doc_type == [MyDocType]
+    assert s._doc_type_map == {}
+    assert s._get_doc_type() == ['doc']
 
     s = search.Search().doc_type(MyDocType)
-    assert s._doc_type == ['my_doc_type']
-    assert s._doc_type_map == {'my_doc_type': MyDocType}
-
+    assert s._doc_type == [MyDocType]
+    assert s._doc_type_map == {}
+    assert s._get_doc_type() == ['doc']
 
 def test_sort():
     s = search.Search()
@@ -205,6 +230,15 @@ def test_sort():
     s = s.sort()
     assert [] == s._sort
     assert search.Search().to_dict() == s.to_dict()
+
+def test_sort_by_score():
+    s = search.Search()
+    s = s.sort('_score')
+    assert {'query': {'match_all': {}}, 'sort': ['_score']} == s.to_dict()
+
+    s = search.Search()
+    with raises(IllegalOperation):
+        s.sort('-_score')
 
 def test_slice():
     s = search.Search()

@@ -1,10 +1,13 @@
 from datetime import datetime
 
 from elasticsearch_dsl import DocType, Boolean, Date
-from elasticsearch_dsl.faceted_search import FacetedSearch, TermsFacet, DateHistogramFacet, RangeFacet
+from elasticsearch_dsl.faceted_search import FacetedSearch, TermsFacet, \
+    DateHistogramFacet, RangeFacet, NestedFacet
+
+from .test_document import PullRequest
 
 class CommitSearch(FacetedSearch):
-    doc_types = ['commits']
+    index = 'flat-git'
     fields = ('description', 'files', )
 
     facets = {
@@ -13,17 +16,52 @@ class CommitSearch(FacetedSearch):
         'deletions': RangeFacet(field='stats.deletions', ranges=[('ok', (None, 1)), ('good', (1, 5)), ('better', (5, None))])
     }
 
+
 class Repos(DocType):
     is_public = Boolean()
     created_at = Date()
 
 class RepoSearch(FacetedSearch):
-    doc_types = [Repos]
-
+    index = 'git'
     facets = {
       'public': TermsFacet(field='is_public'),
       'created': DateHistogramFacet(field='created_at', interval='month')
     }
+
+    def search(self):
+        s = super(RepoSearch, self).search()
+        return s.filter('term', commit_repo='repo')
+
+class PRSearch(FacetedSearch):
+    index = 'test-prs'
+    doc_types = [PullRequest]
+    facets = {
+        'comments': NestedFacet(
+            'comments',
+            DateHistogramFacet(
+                field='comments.created_at',
+                interval='month'
+            )
+        )
+    }
+
+def test_nested_facet(pull_request):
+    prs = PRSearch()
+    r = prs.execute()
+
+    assert r.hits.total == 1
+    assert [(datetime(2018, 1, 1, 0, 0), 1, False)] == r.facets.comments
+
+def test_nested_facet_with_filter(pull_request):
+    prs = PRSearch(filters={'comments': datetime(2018, 1, 1, 0, 0)})
+    r = prs.execute()
+
+    assert r.hits.total == 1
+    assert [(datetime(2018, 1, 1, 0, 0), 1, True)] == r.facets.comments
+
+    prs = PRSearch(filters={'comments': datetime(2018, 2, 1, 0, 0)})
+    r = prs.execute()
+    assert not r.hits
 
 def test_datehistogram_facet(data_client):
     rs = RepoSearch()

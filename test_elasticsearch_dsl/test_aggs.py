@@ -18,6 +18,12 @@ def test_meta():
         'meta': {'some': 'metadata'}
     } == a.to_dict()
 
+def test_meta_from_dict():
+    max_score = aggs.Max(field='score')
+    a = aggs.A('terms', field='tags', aggs={'max_score': max_score}, meta={'some': 'metadata'})
+
+    assert aggs.A(a.to_dict()) == a
+
 def test_A_creates_proper_agg():
     a = aggs.A('terms', field='tags')
 
@@ -177,3 +183,72 @@ def test_filters_correctly_identifies_the_hash():
     } == a.to_dict()
     assert a.filters.group_a == query.Q('term', group='a')
 
+def test_bucket_sort_agg():
+    bucket_sort_agg = aggs.BucketSort(
+        sort=[{"total_sales": {"order": "desc"}}],
+        size=3
+    )
+    assert bucket_sort_agg.to_dict() == {
+        "bucket_sort": {
+            "sort": [
+                {"total_sales": {"order": "desc"}}
+            ],
+            "size": 3
+        }
+    }
+
+    a = aggs.DateHistogram(field='date', interval='month')
+    a.bucket('total_sales', 'sum', field='price')
+    a.bucket(
+        'sales_bucket_sort',
+        'bucket_sort',
+        sort=[{"total_sales": {"order": "desc"}}],
+        size=3
+    )
+    assert {
+        "date_histogram": {
+            "field": "date",
+            "interval": "month"
+        },
+        "aggs": {
+            "total_sales": {
+                "sum": {
+                    "field": "price"
+                }
+            },
+            "sales_bucket_sort": {
+                "bucket_sort": {
+                    "sort": [
+                        {"total_sales": {"order": "desc"}}
+                    ],
+                    "size": 3
+                }
+            }
+        }
+    } == a.to_dict()
+
+def test_bucket_sort_agg_only_trnunc():
+    bucket_sort_agg = aggs.BucketSort(**{'from': 1, 'size': 1})
+    assert bucket_sort_agg.to_dict() == {
+        "bucket_sort": {
+            "from": 1,
+            "size": 1
+        }
+    }
+
+    a = aggs.DateHistogram(field='date', interval='month')
+    a.bucket('bucket_truncate', 'bucket_sort', **{'from': 1, 'size': 1})
+    assert {
+        "date_histogram": {
+            "field": "date",
+            "interval": "month"
+        },
+        "aggs": {
+            "bucket_truncate": {
+                "bucket_sort": {
+                    "from": 1,
+                    "size": 1
+                }
+            }
+        }
+    } == a.to_dict()

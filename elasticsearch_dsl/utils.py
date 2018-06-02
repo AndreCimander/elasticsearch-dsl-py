@@ -1,6 +1,7 @@
 from __future__ import unicode_literals
 
 import collections
+from copy import copy
 
 from six import iteritems, add_metaclass
 from six.moves import map
@@ -8,6 +9,16 @@ from six.moves import map
 from .exceptions import UnknownDslObject, ValidationException
 
 SKIP_VALUES = ('', None)
+EXPAND__TO_DOT=True
+
+DOC_META_FIELDS = frozenset((
+    'id', 'routing', 'version', 'version_type', 'parent'
+))
+
+META_FIELDS = frozenset((
+    # Elasticsearch metadata fields, except 'type'
+    'index', 'using', 'score',
+)).union(DOC_META_FIELDS)
 
 def _wrap(val, obj_wrapper=None):
     if isinstance(val, collections.Mapping):
@@ -39,7 +50,7 @@ class AttrList(object):
     def __getitem__(self, k):
         l = self._l_[k]
         if isinstance(k, slice):
-            return AttrList(l)
+            return AttrList(l, obj_wrapper=self._obj_wrapper)
         return _wrap(l, self._obj_wrapper)
 
     def __setitem__(self, k, value):
@@ -188,7 +199,7 @@ class DslBase(object):
 
     Provides several feature:
         - attribute access to the wrapped dictionary (.field instead of ['field'])
-        - _clone method returning a deep copy of self
+        - _clone method returning a copy of self
         - to_dict method to serialize into dict (to be sent via elasticsearch-py)
         - basic logical operators (&, | and ~) using a Bool(Filter|Query) TODO:
           move into a class specific for Query/Filter
@@ -205,7 +216,7 @@ class DslBase(object):
         except KeyError:
             raise UnknownDslObject('DSL class `%s` does not exist in %s.' % (name, cls._type_name))
 
-    def __init__(self, _expand__to_dot=True, **params):
+    def __init__(self, _expand__to_dot=EXPAND__TO_DOT, **params):
         self._params = {}
         for pname, pvalue in iteritems(params):
             if '__' in pname and _expand__to_dot:
@@ -320,16 +331,33 @@ class DslBase(object):
         return {self.name: d}
 
     def _clone(self):
-        return self._type_shortcut(self.to_dict())
-
+        c = self.__class__()
+        for attr in self._params:
+            c._params[attr] = copy(self._params[attr])
+        return c
 
 class ObjectBase(AttrDict):
     def __init__(self, **kwargs):
-        m = self._doc_type.mapping
-        for k in m:
-            if k in kwargs and m[k]._coerce:
-                kwargs[k] = m[k].deserialize(kwargs[k])
         super(ObjectBase, self).__init__(kwargs)
+
+    @classmethod
+    def from_es(cls, hit):
+        meta = hit.copy()
+        data = meta.pop('_source', {})
+        if 'fields' in meta:
+            for k, v in iteritems(meta.pop('fields')):
+                if k.startswith('_') and k[1:] in META_FIELDS:
+                    meta[k] = v
+                else:
+                    data[k] = v
+
+        doc = cls(meta=meta)
+        m = cls._doc_type.mapping
+        for k, v in iteritems(data):
+            if k in m and m[k]._coerce:
+                v = m[k].deserialize(v)
+            setattr(doc, k, v)
+        return doc
 
     def __getattr__(self, name):
         try:
@@ -345,12 +373,7 @@ class ObjectBase(AttrDict):
                     return value
             raise
 
-    def __setattr__(self, name, value):
-        if name in self._doc_type.mapping:
-            value = self._doc_type.mapping[name].deserialize(value)
-        super(ObjectBase, self).__setattr__(name, value)
-
-    def to_dict(self):
+    def to_dict(self, skip_empty=True):
         out = {}
         for k, v in iteritems(self._d_):
             try:
@@ -361,10 +384,15 @@ class ObjectBase(AttrDict):
                 if f._coerce:
                     v = f.serialize(v)
 
-            # don't serialize empty values
-            # careful not to include numeric zeros
-            if v in ([], {}, None):
-                continue
+            # if someone assigned AttrList, unwrap it
+            if isinstance(v, AttrList):
+                v = v._l_
+
+            if skip_empty:
+                # don't serialize empty values
+                # careful not to include numeric zeros
+                if v in ([], {}, None):
+                    continue
 
             out[k] = v
         return out
@@ -399,7 +427,8 @@ def merge(data, new_data):
         raise ValueError('You can only merge two dicts! Got %r and %r instead.' % (data, new_data))
 
     for key, value in iteritems(new_data):
-        if key in data and isinstance(data[key], (AttrDict, collections.Mapping)):
-            merge(data[key], value)
+        if key in data and isinstance(getattr(data, key), (AttrDict, collections.Mapping)) and \
+                isinstance(value, (AttrDict, collections.Mapping)):
+            merge(getattr(data, key), value)
         else:
-            data[key] = value
+            setattr(data, key, value)

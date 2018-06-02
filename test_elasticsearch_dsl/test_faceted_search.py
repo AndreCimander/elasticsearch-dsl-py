@@ -1,4 +1,8 @@
-from elasticsearch_dsl.faceted_search import FacetedSearch, TermsFacet
+from datetime import datetime
+
+from elasticsearch_dsl.faceted_search import (FacetedSearch, TermsFacet,
+                                              DateHistogramFacet)
+
 
 class BlogSearch(FacetedSearch):
     doc_types = ['user', 'post']
@@ -63,12 +67,6 @@ def test_query_is_created_properly_with_sort_tuple():
         'sort': ['category', {'title': {'order': 'desc'}}]
     } == s.to_dict()
 
-def test_sort_string_backwards_compat():
-    bs_old = BlogSearch('python search', sort='-title').build_search().to_dict()
-    bs_new = BlogSearch('python search', sort=['-title']).build_search().to_dict()
-    assert bs_old == bs_new
-    assert [{'title': {'order': 'desc'}}] == bs_new['sort']
-
 def test_filter_is_applied_to_search_but_not_relevant_facet():
     bs = BlogSearch('python search', filters={'category': 'elastic'})
     s = bs.build_search()
@@ -131,3 +129,8 @@ def test_filters_are_applied_to_search_ant_relevant_facets():
         'highlight': {'fields': {'body': {}, 'title': {}}}
     } == d
 
+
+def test_date_histogram_facet_with_1970_01_01_date():
+    dhf = DateHistogramFacet()
+    assert dhf.get_value({'key': None}) == datetime(1970, 1, 1, 0, 0)
+    assert dhf.get_value({'key': 0}) == datetime(1970, 1, 1, 0, 0)

@@ -64,7 +64,7 @@ class Facet(object):
         selected or not.
         """
         out = []
-        for bucket in data:
+        for bucket in data.buckets:
             key = self.get_value(bucket)
             out.append((
                 key,
@@ -141,7 +141,12 @@ class DateHistogramFacet(Facet):
 
     def get_value(self, bucket):
         if not isinstance(bucket['key'], datetime):
-            return datetime.utcfromtimestamp(int(bucket['key']) / 1000)
+            # Elasticsearch returns key=None instead of 0 for date 1970-01-01,
+            # so we need to set key to 0 to avoid TypeError exception
+            if bucket['key'] is None:
+                bucket['key'] = 0
+            # Preserve milliseconds in the datetime
+            return datetime.utcfromtimestamp(int(bucket['key']) / 1000.0)
         else:
             return bucket['key']
 
@@ -153,6 +158,21 @@ class DateHistogramFacet(Facet):
             }
         })
 
+class NestedFacet(Facet):
+    agg_type = 'nested'
+
+    def __init__(self, path, nested_facet):
+        self._path = path
+        self._inner = nested_facet
+        super(NestedFacet, self).__init__(path=path, aggs={'inner': nested_facet.get_aggregation()})
+
+    def get_values(self, data, filter_values):
+        return self._inner.get_values(data.inner, filter_values)
+
+    def add_filter(self, filter_values):
+        inner_q = self._inner.add_filter(filter_values)
+        if inner_q:
+            return Q('nested', path=self._path, query=inner_q)
 
 class FacetedResponse(Response):
     @property
@@ -165,7 +185,7 @@ class FacetedResponse(Response):
             super(AttrDict, self).__setattr__('_facets', AttrDict({}))
             for name, facet in iteritems(self._faceted_search.facets):
                 self._facets[name] = facet.get_values(
-                    getattr(getattr(self.aggregations, '_filter_' + name), name).buckets,
+                    getattr(getattr(self.aggregations, '_filter_' + name), name),
                     self._faceted_search.filter_values.get(name, ())
                 )
         return self._facets
@@ -212,10 +232,11 @@ class FacetedSearch(object):
             )
 
     """
-    index = '_all'
-    doc_types = ['_all']
+    index = None
+    doc_types = None
     fields = ('*', )
     facets = {}
+    using = 'default'
 
     def __init__(self, query=None, filters={}, sort=()):
         """
@@ -225,11 +246,7 @@ class FacetedSearch(object):
         """
         self._query = query
         self._filters = {}
-        # TODO: remove in 6.0
-        if isinstance(sort, string_types):
-            self._sort = (sort,)
-        else:
-            self._sort = sort
+        self._sort = sort
         self.filter_values = {}
         for name, value in iteritems(filters):
             self.add_filter(name, value)
@@ -268,9 +285,12 @@ class FacetedSearch(object):
 
     def search(self):
         """
-        Construct the Search object.
+        Returns the base Search object to which the facets are added.
+
+        You can customize the query by overriding this method and returning a
+        modified search object.
         """
-        s = Search(doc_type=self.doc_types, index=self.index)
+        s = Search(doc_type=self.doc_types, index=self.index, using=self.using)
         return s.response_class(FacetedResponse)
 
     def query(self, search, query):
