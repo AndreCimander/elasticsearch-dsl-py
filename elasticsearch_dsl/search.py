@@ -688,7 +688,7 @@ class Search(Request):
             )
         return self._response
 
-    def scan(self):
+    def scan(self, raw=False):
         """
         Turn the search into a scan search and return a generator that will
         iterate over all the documents matching the query.
